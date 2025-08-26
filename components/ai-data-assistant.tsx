@@ -28,6 +28,9 @@ import {
   CheckCircle,
   AlertTriangle,
   Info,
+  FileText,
+  RefreshCw,
+  Share2,
 } from "lucide-react"
 
 /**
@@ -228,6 +231,7 @@ export function AiDataAssistant({ file, onFileUpdate }: AiDataAssistantProps) {
   const [activeTab, setActiveTab] = useState("recommendations")
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [useLocalKnowledge, setUseLocalKnowledge] = useState(false)
+  const [showPostCleaningOptions, setShowPostCleaningOptions] = useState(false)
 
   // Monitor online status
   useEffect(() => {
@@ -545,7 +549,7 @@ WHERE id IN (
       const dataSummary = {
         fileName: file.name,
         totalRows: file.analysis?.totalRows || file.data.length,
-        totalColumns: file.analysis?.totalColumns || file.headers.length,
+        totalColumns: file.headers.length,
         headers: file.headers,
         dataTypes: file.analysis?.dataTypes || {},
         nullValues: file.analysis?.nullValues || {},
@@ -915,6 +919,7 @@ Use friendly, conversational language as if you're talking to a colleague who tr
 
       onFileUpdate(updatedFile)
       setSelectedRecommendations(new Set())
+      setShowPostCleaningOptions(true)
       toast.success(`Applied ${selectedRecommendations.size} recommendations, made ${totalChanges} changes`)
     } catch (error) {
       console.error("Error applying recommendations:", error)
@@ -922,51 +927,174 @@ Use friendly, conversational language as if you're talking to a colleague who tr
     }
   }, [selectedRecommendations, cleaningRecommendations, file, onFileUpdate])
 
-  /**
-   * Export analysis report
-   */
-  const exportAnalysisReport = useCallback(() => {
+  const downloadCleanedData = useCallback(() => {
     try {
-      const report = {
-        metadata: {
-          fileName: file.name,
-          generatedAt: new Date().toISOString(),
-          totalRows: file.data.length,
-          totalColumns: file.headers.length,
-          qualityScore: file.analysis?.qualityScore || 0,
-          analysisMethod: isOnline && !useLocalKnowledge ? "AI-powered" : "Local knowledge base",
-        },
-        cleaningRecommendations,
-        businessInsights,
-        customAnalysis: customAnalysis || null,
-        knowledgeBase: {
-          dataQualityRules: LOCAL_KNOWLEDGE_BASE.dataQualityRules,
-        },
-      }
+      const csvContent = [
+        file.headers.join(","),
+        ...file.data.map((row) =>
+          file.headers
+            .map((header) => {
+              const value = row[header]
+              return typeof value === "string" && value.includes(",") ? `"${value}"` : value
+            })
+            .join(","),
+        ),
+      ].join("\n")
 
-      const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" })
+      const blob = new Blob([csvContent], { type: "text/csv" })
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = url
-      a.download = `${file.name.replace(/\.[^/.]+$/, "")}_ai_analysis.json`
+      a.download = `${file.name.replace(/\.[^/.]+$/, "")}_cleaned.csv`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
 
-      toast.success("Analysis report exported successfully!")
+      toast.success("Cleaned data downloaded successfully!")
     } catch (error) {
-      console.error("Error exporting report:", error)
-      toast.error("Failed to export analysis report")
+      console.error("Error downloading cleaned data:", error)
+      toast.error("Failed to download cleaned data")
     }
-  }, [file, cleaningRecommendations, businessInsights, customAnalysis, isOnline, useLocalKnowledge])
+  }, [file])
 
-  // ============================================================================
-  // COMPONENT RENDER
-  // ============================================================================
+  const generateSummaryReport = useCallback(() => {
+    try {
+      const report = {
+        fileName: file.name,
+        cleaningDate: new Date().toISOString(),
+        originalRows: file.data.length,
+        finalRows: file.data.length,
+        changesApplied: file.efficiency?.fixesApplied || 0,
+        qualityImprovement: file.efficiency?.dataQualityImprovement || 0,
+        recommendationsApplied: cleaningRecommendations
+          .filter((rec) => Array.from(selectedRecommendations).includes(rec.id))
+          .map((rec) => ({
+            title: rec.title,
+            category: rec.category,
+            impact: rec.impact,
+            affectedRows: rec.affectedRows,
+          })),
+      }
+
+      const reportContent = `Data Cleaning Summary Report
+Generated: ${new Date().toLocaleString()}
+
+File: ${report.fileName}
+Original Rows: ${report.originalRows}
+Final Rows: ${report.finalRows}
+Changes Applied: ${report.changesApplied}
+Quality Improvement: ${report.qualityImprovement}%
+
+Recommendations Applied:
+${report.recommendationsApplied
+  .map((rec) => `- ${rec.title} (${rec.category}, ${rec.impact} impact, ${rec.affectedRows} rows affected)`)
+  .join("\n")}
+`
+
+      const blob = new Blob([reportContent], { type: "text/plain" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `${file.name.replace(/\.[^/.]+$/, "")}_cleaning_report.txt`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+
+      toast.success("Summary report generated!")
+    } catch (error) {
+      console.error("Error generating report:", error)
+      toast.error("Failed to generate report")
+    }
+  }, [file, cleaningRecommendations, selectedRecommendations])
 
   return (
     <div className="space-y-6">
+      {showPostCleaningOptions && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                <CheckCircle className="w-6 h-6 text-green-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Cleaning Complete!</h3>
+                <p className="text-sm text-gray-600">Your data has been successfully cleaned.</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 mb-6">
+              <button
+                onClick={downloadCleanedData}
+                className="w-full flex items-center gap-3 p-3 text-left border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <Download className="w-5 h-5 text-blue-600" />
+                <div>
+                  <div className="font-medium text-gray-900">Download Cleaned Data</div>
+                  <div className="text-sm text-gray-600">Get your cleaned dataset as CSV</div>
+                </div>
+              </button>
+
+              <button
+                onClick={generateSummaryReport}
+                className="w-full flex items-center gap-3 p-3 text-left border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <FileText className="w-5 h-5 text-green-600" />
+                <div>
+                  <div className="font-medium text-gray-900">Generate Summary Report</div>
+                  <div className="text-sm text-gray-600">Detailed report of all changes made</div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowPostCleaningOptions(false)
+                }}
+                className="w-full flex items-center gap-3 p-3 text-left border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <RefreshCw className="w-5 h-5 text-purple-600" />
+                <div>
+                  <div className="font-medium text-gray-900">Run Additional Analysis</div>
+                  <div className="text-sm text-gray-600">Analyze the cleaned data for more insights</div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(window.location.href)
+                  toast.success("Link copied to clipboard!")
+                }}
+                className="w-full flex items-center gap-3 p-3 text-left border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <Share2 className="w-5 h-5 text-orange-600" />
+                <div>
+                  <div className="font-medium text-gray-900">Share Results</div>
+                  <div className="text-sm text-gray-600">Copy link to share with your team</div>
+                </div>
+              </button>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowPostCleaningOptions(false)}
+                className="flex-1 px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  setShowPostCleaningOptions(false)
+                  downloadCleanedData()
+                }}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Download & Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Header with Status */}
       <div className="flex justify-between items-start flex-wrap gap-3">
         <div>
@@ -1000,7 +1128,7 @@ Use friendly, conversational language as if you're talking to a colleague who tr
             </Button>
 
             {(cleaningRecommendations.length > 0 || businessInsights.length > 0) && (
-              <Button variant="outline" onClick={exportAnalysisReport}>
+              <Button variant="outline">
                 <Download className="h-4 w-4 mr-2" />
                 Export Report
               </Button>

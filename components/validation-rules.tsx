@@ -642,11 +642,11 @@ export function ValidationRules({ file, onFileUpdate }: ValidationRulesProps) {
                   <div>
                     <Label htmlFor="rule-severity">Severity</Label>
                     <Select
-                      value={newRule.severity}
+                      value={newRule.severity || undefined}
                       onValueChange={(value: any) => setNewRule({ ...newRule, severity: value })}
                     >
                       <SelectTrigger>
-                        <SelectValue />
+                        <SelectValue placeholder="Select severity" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="low">Low</SelectItem>
