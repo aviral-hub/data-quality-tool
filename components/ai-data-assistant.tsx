@@ -42,15 +42,29 @@ function safeJSONParse<T = any>(text: string): T {
     // First try the whole string
     return JSON.parse(text) as T
   } catch {
-    // Fallback: extract the first {...} pair
-    const start = text.indexOf("{")
-    const end = text.lastIndexOf("}")
-    if (start !== -1 && end !== -1 && end > start) {
-      const maybeJson = text.substring(start, end + 1)
-      return JSON.parse(maybeJson) as T
+    // Remove markdown code blocks if present
+    let cleanText = text
+
+    // Remove markdown code blocks (\`\`\`json ... \`\`\`)
+    cleanText = cleanText.replace(/```(?:json)?\s*([\s\S]*?)\s*```/g, "$1")
+
+    // Remove single backticks
+    cleanText = cleanText.replace(/`/g, "")
+
+    // Try parsing the cleaned text
+    try {
+      return JSON.parse(cleanText) as T
+    } catch {
+      // Fallback: extract the first {...} pair
+      const start = cleanText.indexOf("{")
+      const end = cleanText.lastIndexOf("}")
+      if (start !== -1 && end !== -1 && end > start) {
+        const maybeJson = cleanText.substring(start, end + 1)
+        return JSON.parse(maybeJson) as T
+      }
+      // Still no luck – rethrow to trigger local-knowledge fallback
+      throw new Error("Could not locate valid JSON in LLM response")
     }
-    // Still no luck – rethrow to trigger local-knowledge fallback
-    throw new Error("Could not locate valid JSON in LLM response")
   }
 }
 
@@ -232,6 +246,7 @@ export function AiDataAssistant({ file, onFileUpdate }: AiDataAssistantProps) {
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [useLocalKnowledge, setUseLocalKnowledge] = useState(false)
   const [showPostCleaningOptions, setShowPostCleaningOptions] = useState(false)
+  const [isGeneratingRecommendations, setIsGeneratingRecommendations] = useState(false)
 
   // Monitor online status
   useEffect(() => {
@@ -665,78 +680,78 @@ Focus on practical, business-focused explanations that anyone can understand. Us
   /**
    * Generate business insights with user-friendly explanations
    */
-  const generateBusinessInsights = useCallback(async (dataSummary: any) => {
-    const prompt = `You are a business consultant explaining data insights to a company owner. Use simple language and focus on business impact, not technical details.
+  const generateBusinessInsights = useCallback(
+    async (dataSummary: any) => {
+      const prompt = `You are a business consultant explaining data insights to a company owner. Use simple language and focus on business impact, not technical details.
 
-Dataset: ${dataSummary.fileName}
-- ${dataSummary.totalRows} records
-- Quality score: ${dataSummary.qualityScore}%
-- ${Object.values(dataSummary.nullValues).reduce((sum: number, count: any) => sum + count, 0)} missing values
-- ${dataSummary.duplicates} duplicates
+Dataset: ${JSON.stringify(dataSummary, null, 2)}
 
-Provide 4-5 business insights in JSON format:
+IMPORTANT: Return ONLY a valid JSON object with no markdown formatting, no code blocks, no backticks, and no additional text. The response must be parseable JSON.
+
+Required JSON format:
 {
   "insights": [
     {
       "id": "unique_id",
-      "title": "Business-focused insight title",
-      "description": "Brief technical description",
-      "userFriendlyExplanation": "Explain the business impact in simple terms with analogies",
-      "impact": "How this affects the business (revenue, customers, operations, etc.)",
-      "recommendation": "What the business should do about it",
-      "priority": "low|medium|high|critical",
-      "timeline": "When this should be addressed",
-      "costBenefit": "Cost of fixing vs cost of not fixing",
-      "actionItems": ["Specific action 1", "Specific action 2", "Specific action 3"],
-      "metrics": {
-        "before": 75,
-        "after": 90,
-        "improvement": 15
-      }
+      "title": "Business insight title",
+      "description": "What the data shows",
+      "userFriendlyExplanation": "Simple explanation in business terms",
+      "impact": "high|medium|low",
+      "recommendation": "What action to take",
+      "priority": "urgent|high|medium|low",
+      "timeline": "When to act",
+      "costBenefit": "Investment vs return explanation",
+      "metrics": ["Key metrics to track"],
+      "actionItems": ["Specific steps to take"]
     }
   ]
-}
+}`
 
-Focus on:
-- Revenue impact and cost savings
-- Customer satisfaction and retention
-- Operational efficiency improvements
-- Risk management and compliance
-- Competitive advantages from better data`
+      try {
+        if (!isOnline) {
+          // Use local knowledge-based insights
+          const localInsights = getLocalInsights(dataSummary)
+          setBusinessInsights(localInsights)
+          toast.success("Insights generated using local knowledge!")
+          return
+        }
 
-    try {
-      const { text } = await generateText({
-        model: groq("llama-3.1-8b-instant"),
-        prompt,
-        maxTokens: 2500,
-      })
+        const { text } = await generateText({
+          model: groq("llama-3.1-8b-instant"),
+          prompt,
+          maxTokens: 2500,
+        })
 
-      const aiResponse = safeJSONParse<{ insights: any[] }>(text)
-      if (!aiResponse?.insights?.length) {
-        throw new Error("No insights field in AI response")
+        console.log("[v0] Business insights response:", text.substring(0, 200) + "...")
+
+        const aiResponse = safeJSONParse<{ insights: any[] }>(text)
+        if (!aiResponse?.insights?.length) {
+          throw new Error("No insights field in AI response")
+        }
+
+        const insights: BusinessInsight[] = aiResponse.insights.map((insight: any) => ({
+          id: insight.id || `insight_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          title: insight.title,
+          description: insight.description,
+          userFriendlyExplanation: insight.userFriendlyExplanation,
+          impact: insight.impact,
+          recommendation: insight.recommendation,
+          priority: insight.priority,
+          timeline: insight.timeline || "Within 1 month",
+          costBenefit: insight.costBenefit || "Investment in data quality pays off through better decisions",
+          metrics: insight.metrics,
+          actionItems: insight.actionItems || [],
+        }))
+
+        setBusinessInsights(insights)
+      } catch (error) {
+        console.error("Error generating business insights:", error)
+        toast.error("AI response was not valid JSON – falling back to local knowledge")
+        throw error
       }
-
-      const insights: BusinessInsight[] = aiResponse.insights.map((insight: any) => ({
-        id: insight.id || `insight_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        title: insight.title,
-        description: insight.description,
-        userFriendlyExplanation: insight.userFriendlyExplanation,
-        impact: insight.impact,
-        recommendation: insight.recommendation,
-        priority: insight.priority,
-        timeline: insight.timeline || "Within 1 month",
-        costBenefit: insight.costBenefit || "Investment in data quality pays off through better decisions",
-        metrics: insight.metrics,
-        actionItems: insight.actionItems || [],
-      }))
-
-      setBusinessInsights(insights)
-    } catch (error) {
-      console.error("Error generating business insights:", error)
-      toast.error("AI response was not valid JSON – falling back to local knowledge")
-      throw error
-    }
-  }, [])
+    },
+    [isOnline, getLocalInsights],
+  )
 
   /**
    * Generate custom analysis based on user prompt
@@ -1008,6 +1023,146 @@ ${report.recommendationsApplied
       toast.error("Failed to generate report")
     }
   }, [file, cleaningRecommendations, selectedRecommendations])
+
+  const getLocalRecommendations = useCallback((file: FileData): CleaningRecommendation[] => {
+    // Implement your local knowledge-based recommendation logic here
+    // This is a placeholder, replace with your actual implementation
+    return [
+      {
+        id: "local_recommendation_1",
+        title: "Example Local Recommendation",
+        description: "This is an example recommendation generated from local knowledge.",
+        userFriendlyExplanation: "We found a potential issue and recommend you take a look.",
+        impact: "medium",
+        confidence: 0.8,
+        affectedRows: 50,
+        category: "formatting",
+        businessImpact: "This could improve data consistency.",
+        stepByStepGuide: ["Step 1: Review the data", "Step 2: Apply formatting changes"],
+        estimatedTimeToFix: "30 minutes",
+        difficulty: "easy",
+        code: {
+          python: "# Example Python code",
+          sql: "-- Example SQL code",
+        },
+        preview: "The data will be formatted consistently.",
+      },
+    ]
+  }, [])
+
+  const getLocalInsights = useCallback((dataSummary: any): BusinessInsight[] => {
+    // Implement your local knowledge-based insights logic here
+    // This is a placeholder, replace with your actual implementation
+    return [
+      {
+        id: "local_insight_1",
+        title: "Example Local Insight",
+        description: "This is an example insight generated from local knowledge.",
+        userFriendlyExplanation: "We found a potential trend in your data.",
+        impact: "medium",
+        recommendation: "Investigate the trend further.",
+        priority: "medium",
+        timeline: "Within 1 week",
+        costBenefit: "Understanding this trend could lead to better decisions.",
+        actionItems: ["Analyze the data", "Discuss findings with the team"],
+      },
+    ]
+  }, [])
+
+  const generateAIRecommendations = useCallback(async () => {
+    if (!file || isGeneratingRecommendations) return
+
+    setIsGeneratingRecommendations(true)
+
+    try {
+      if (!isOnline) {
+        // Use local knowledge-based recommendations
+        const localRecommendations = getLocalRecommendations(file)
+        setCleaningRecommendations(localRecommendations)
+        toast.success("Recommendations generated using local knowledge!")
+        return
+      }
+
+      const dataSummary = {
+        fileName: file.name,
+        totalRows: file.data.length,
+        headers: file.headers,
+        sampleData: file.data.slice(0, 5),
+        qualityScore: file.analysis?.qualityScore || 0,
+        issues: file.analysis?.issues || [],
+      }
+
+      const prompt = `You are a data cleaning expert. Analyze this dataset and provide cleaning recommendations.
+
+Dataset: ${JSON.stringify(dataSummary, null, 2)}
+
+IMPORTANT: Return ONLY a valid JSON object with no markdown formatting, no code blocks, no backticks, and no additional text. The response must be parseable JSON.
+
+Required JSON format:
+{
+  "recommendations": [
+    {
+      "id": "unique_id",
+      "title": "Brief title",
+      "description": "What needs to be cleaned",
+      "userFriendlyExplanation": "Simple explanation for business users",
+      "impact": "high|medium|low",
+      "confidence": 0.95,
+      "affectedRows": 150,
+      "category": "duplicates|missing_data|formatting|validation|outliers",
+      "businessImpact": "How this affects business decisions",
+      "stepByStepGuide": ["Step 1", "Step 2"],
+      "estimatedTimeToFix": "15 minutes",
+      "difficulty": "easy|medium|hard",
+      "pythonCode": "# Python code to fix",
+      "sqlCode": "-- SQL code to fix",
+      "preview": "What the data will look like after cleaning"
+    }
+  ]
+}`
+
+      const { text } = await generateText({
+        model: groq("llama-3.1-8b-instant"),
+        prompt,
+        maxTokens: 3000,
+      })
+
+      console.log("[v0] AI response received:", text.substring(0, 200) + "...")
+
+      const aiResponse = safeJSONParse<{ recommendations: any[] }>(text)
+      if (!aiResponse?.recommendations?.length) {
+        throw new Error("No recommendations field in AI response")
+      }
+
+      const recommendations: CleaningRecommendation[] = aiResponse.recommendations.map((rec: any) => ({
+        id: rec.id || `rec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        title: rec.title,
+        description: rec.description,
+        userFriendlyExplanation: rec.userFriendlyExplanation,
+        impact: rec.impact,
+        confidence: rec.confidence,
+        affectedRows: rec.affectedRows,
+        category: rec.category,
+        businessImpact: rec.businessImpact,
+        stepByStepGuide: rec.stepByStepGuide || [],
+        estimatedTimeToFix: rec.estimatedTimeToFix || "30 minutes",
+        difficulty: rec.difficulty || "medium",
+        code: {
+          python: rec.pythonCode,
+          sql: rec.sqlCode,
+        },
+        preview: rec.preview,
+      }))
+
+      setCleaningRecommendations(recommendations)
+    } catch (error) {
+      console.error("Error generating AI recommendations:", error)
+      toast.error("AI response was not valid JSON – falling back to local knowledge")
+      throw error
+    } finally {
+      setIsGeneratingRecommendations(false)
+    }
+  }, [file, isGeneratingRecommendations, isOnline, getLocalRecommendations])
 
   return (
     <div className="space-y-6">
