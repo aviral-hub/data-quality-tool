@@ -46,6 +46,12 @@ export function DataAnalysis({ file, onFileUpdate }: DataAnalysisProps) {
     )
   }
 
+  const safePercent = (numerator: number, denominator: number) => {
+    if (!denominator || !Number.isFinite(numerator) || !Number.isFinite(denominator)) return 0
+    const v = (numerator / denominator) * 100
+    return Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 0
+  }
+
   const getSeverityColor = (severity: string) => {
     switch (severity) {
       case "critical":
@@ -96,7 +102,7 @@ export function DataAnalysis({ file, onFileUpdate }: DataAnalysisProps) {
       column: column.length > 15 ? column.substring(0, 15) + "..." : column,
       fullColumn: column,
       nulls: count,
-      percentage: Math.round((count / analysis.totalRows) * 100),
+      percentage: Math.round(safePercent(count, analysis.totalRows)),
       nonNulls: analysis.totalRows - count,
     }))
     .sort((a, b) => b.percentage - a.percentage)
@@ -112,7 +118,7 @@ export function DataAnalysis({ file, onFileUpdate }: DataAnalysisProps) {
   const pieData = Object.entries(dataTypesData).map(([type, count]) => ({
     name: type.charAt(0).toUpperCase() + type.slice(1),
     value: count,
-    percentage: Math.round((count / analysis.totalColumns) * 100),
+    percentage: safePercent(count, analysis.totalColumns),
   }))
 
   const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884D8", "#82ca9d"]
@@ -251,7 +257,7 @@ export function DataAnalysis({ file, onFileUpdate }: DataAnalysisProps) {
             </div>
             <p className="text-xs text-muted-foreground">
               {Math.round(
-                ((analysis.contextualIssues.length + analysis.crossFieldIssues.length) / analysis.totalRows) * 100,
+                safePercent(analysis.contextualIssues.length + analysis.crossFieldIssues.length, analysis.totalRows),
               )}
               % of rows affected
             </p>
@@ -266,7 +272,7 @@ export function DataAnalysis({ file, onFileUpdate }: DataAnalysisProps) {
           <CardContent>
             <div className="text-2xl font-bold text-orange-600">{analysis.duplicates}</div>
             <p className="text-xs text-muted-foreground">
-              {Math.round((analysis.duplicates / analysis.totalRows) * 100)}% duplicate rate
+              {Math.round(safePercent(analysis.duplicates, analysis.totalRows))}% duplicate rate
             </p>
           </CardContent>
         </Card>
@@ -346,25 +352,31 @@ export function DataAnalysis({ file, onFileUpdate }: DataAnalysisProps) {
                 <CardDescription>Types of data columns in your dataset</CardDescription>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={pieData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ name, percentage }) => `${name} (${percentage}%)`}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {pieData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(value, name) => [`${value} columns`, name]} />
-                  </PieChart>
-                </ResponsiveContainer>
+                {pieData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                      <Pie
+                        data={pieData}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        label={({ name, percentage }) => `${name} (${percentage}%)`}
+                        outerRadius={80}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        {pieData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value, name) => [`${value} columns`, name]} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
+                    No data types available
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -469,10 +481,10 @@ export function DataAnalysis({ file, onFileUpdate }: DataAnalysisProps) {
                               <span className="text-xs text-gray-500">Row {issue.row + 1}</span>
                             </div>
                             <p className="text-sm text-gray-700 mb-1">{issue.issue}</p>
-                            <p className="text-xs text-gray-500 mb-1">
+                            <p className="text-sm text-gray-500 mb-1">
                               Value: <code className="bg-gray-100 px-1 rounded">{String(issue.value)}</code>
                             </p>
-                            <p className="text-xs text-blue-600">{issue.suggestion}</p>
+                            <p className="text-sm text-blue-600">{issue.suggestion}</p>
                           </div>
                         </div>
                       ))
@@ -522,7 +534,7 @@ export function DataAnalysis({ file, onFileUpdate }: DataAnalysisProps) {
                               <span className="text-xs text-gray-500">Row {issue.row + 1}</span>
                             </div>
                             <p className="text-sm text-gray-700 mb-1">{issue.issue}</p>
-                            <p className="text-xs text-blue-600">{issue.suggestion}</p>
+                            <p className="text-sm text-blue-600">{issue.suggestion}</p>
                           </div>
                         </div>
                       ))

@@ -40,23 +40,27 @@ export function TrendDashboard({ files }: TrendDashboardProps) {
   // Prepare time series data
   const timeSeriesData = files
     .sort((a, b) => a.uploadDate.getTime() - b.uploadDate.getTime())
-    .map((file, index) => ({
-      date: format(file.uploadDate, "MMM dd"),
-      qualityScore: getQualityScore(file),
-      totalIssues: (file.analysis?.contextualIssues.length || 0) + (file.analysis?.crossFieldIssues.length || 0),
-      processingTime: file.efficiency?.processingTime || 0,
-      rowsProcessed: file.analysis?.totalRows || 0,
-      duplicates: file.analysis?.duplicates || 0,
-      nullPercentage: file.analysis
-        ? (Object.values(file.analysis.nullValues).reduce((sum, count) => sum + count, 0) /
-            (file.analysis.totalRows * file.headers.length)) *
-          100
-        : 0,
-    }))
+    .map((file, index) => {
+      const totalRows = file.analysis?.totalRows ?? 0
+      const headersLen = file.headers?.length ?? 0
+      const totalNulls = file.analysis
+        ? Object.values(file.analysis.nullValues).reduce((sum, count) => sum + count, 0)
+        : 0
+
+      return {
+        date: format(file.uploadDate, "MMM dd"),
+        qualityScore: getQualityScore(file),
+        totalIssues: (file.analysis?.contextualIssues.length || 0) + (file.analysis?.crossFieldIssues.length || 0),
+        processingTime: file.efficiency?.processingTime || 0,
+        rowsProcessed: file.analysis?.totalRows || 0,
+        duplicates: file.analysis?.duplicates || 0,
+        nullPercentage:
+          file.analysis && totalRows > 0 && headersLen > 0 ? (totalNulls / (totalRows * headersLen)) * 100 : 0,
+      }
+    })
 
   // Calculate trends
   const recentFiles = files.filter((file) => isAfter(file.uploadDate, subDays(new Date(), 7)))
-
   const olderFiles = files.filter((file) => !isAfter(file.uploadDate, subDays(new Date(), 7)))
 
   const recentAvgQuality =
@@ -121,14 +125,21 @@ export function TrendDashboard({ files }: TrendDashboardProps) {
     if (!file.analysis) return 0
 
     const totalRows = file.analysis.totalRows
+    const headersLen = file.headers?.length ?? 0
+    if (!totalRows || !headersLen) return 0
+
     const totalIssues = file.analysis.contextualIssues.length + file.analysis.crossFieldIssues.length
     const nullPercentage =
-      Object.values(file.analysis.nullValues).reduce((sum, count) => sum + count, 0) / (totalRows * file.headers.length)
+      Object.values(file.analysis.nullValues).reduce((sum, count) => sum + count, 0) / (totalRows * headersLen)
 
     let score = 100
-    score -= (totalIssues / totalRows) * 50
-    score -= nullPercentage * 30
-    score -= (file.analysis.duplicates / totalRows) * 20
+    const issuesPenalty = (totalIssues / totalRows) * 50
+    const nullPenalty = nullPercentage * 30
+    const dupPenalty = (file.analysis.duplicates / totalRows) * 20
+
+    score -= issuesPenalty
+    score -= nullPenalty
+    score -= dupPenalty
 
     return Math.max(0, Math.round(score))
   }
@@ -218,21 +229,27 @@ export function TrendDashboard({ files }: TrendDashboardProps) {
             <CardDescription>Track quality scores across file uploads</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={timeSeriesData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis domain={[0, 100]} />
-                <Tooltip formatter={(value) => [`${value}%`, "Quality Score"]} />
-                <Line
-                  type="monotone"
-                  dataKey="qualityScore"
-                  stroke="#8884d8"
-                  strokeWidth={2}
-                  dot={{ fill: "#8884d8" }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            {timeSeriesData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={timeSeriesData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" />
+                  <YAxis domain={[0, 100]} />
+                  <Tooltip formatter={(value) => [`${value}%`, "Quality Score"]} />
+                  <Line
+                    type="monotone"
+                    dataKey="qualityScore"
+                    stroke="#8884d8"
+                    strokeWidth={2}
+                    dot={{ fill: "#8884d8" }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
+                No time series data available
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -307,15 +324,21 @@ export function TrendDashboard({ files }: TrendDashboardProps) {
             <CardDescription>Types of data columns across all files</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={dataTypeChartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="type" />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="count" fill="#82ca9d" />
-              </BarChart>
-            </ResponsiveContainer>
+            {dataTypeChartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={dataTypeChartData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="type" />
+                  <YAxis />
+                  <Tooltip />
+                  <Bar dataKey="count" fill="#82ca9d" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
+                No data type distribution available
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -327,17 +350,23 @@ export function TrendDashboard({ files }: TrendDashboardProps) {
           <CardDescription>Comprehensive view of data quality indicators</CardDescription>
         </CardHeader>
         <CardContent>
-          <ResponsiveContainer width="100%" height={400}>
-            <LineChart data={timeSeriesData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="date" />
-              <YAxis />
-              <Tooltip />
-              <Line type="monotone" dataKey="totalIssues" stroke="#ff7300" name="Total Issues" />
-              <Line type="monotone" dataKey="duplicates" stroke="#ff0000" name="Duplicates" />
-              <Line type="monotone" dataKey="nullPercentage" stroke="#ffbb28" name="Null Percentage" />
-            </LineChart>
-          </ResponsiveContainer>
+          {timeSeriesData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={400}>
+              <LineChart data={timeSeriesData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Line type="monotone" dataKey="totalIssues" stroke="#ff7300" name="Total Issues" />
+                <Line type="monotone" dataKey="duplicates" stroke="#ff0000" name="Duplicates" />
+                <Line type="monotone" dataKey="nullPercentage" stroke="#ffbb28" name="Null Percentage" />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
+              No metrics available
+            </div>
+          )}
         </CardContent>
       </Card>
 
