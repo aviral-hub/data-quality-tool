@@ -373,9 +373,11 @@ export default function InteractiveDataCleaner({ file, onFileUpdate }: Interacti
         if (!matchesSearch) return false
       }
 
-      // Column filter
       if (filterColumn !== "all") {
-        const columnValue = row[filterColumn]
+        const colKey = filterColumn.startsWith("__idx_")
+          ? (file.headers?.[Number(filterColumn.slice(6))] ?? "")
+          : filterColumn
+        const columnValue = (row as any)[colKey]
         if (columnValue === null || columnValue === undefined || columnValue === "") {
           return false
         }
@@ -383,7 +385,7 @@ export default function InteractiveDataCleaner({ file, onFileUpdate }: Interacti
 
       return true
     })
-  }, [file.data, searchTerm, filterColumn])
+  }, [file.data, file.headers, searchTerm, filterColumn])
 
   // Generate suggestions on component mount
   React.useEffect(() => {
@@ -851,15 +853,20 @@ export default function InteractiveDataCleaner({ file, onFileUpdate }: Interacti
                   </div>
                   <Select value={filterColumn} onValueChange={setFilterColumn}>
                     <SelectTrigger className="w-40">
-                      <SelectValue />
+                      <SelectValue placeholder="Filter column" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Columns</SelectItem>
-                      {file.headers?.map((header) => (
-                        <SelectItem key={header} value={header}>
-                          {header}
-                        </SelectItem>
-                      ))}
+                      {file.headers?.map((header, idx) => {
+                        const hasName = !!header && String(header).trim() !== ""
+                        const label = hasName ? String(header) : `Unnamed column ${idx + 1}`
+                        const valueKey = hasName ? String(header) : `__idx_${idx}`
+                        return (
+                          <SelectItem key={valueKey} value={valueKey}>
+                            {label}
+                          </SelectItem>
+                        )
+                      })}
                     </SelectContent>
                   </Select>
                 </div>
