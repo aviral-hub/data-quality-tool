@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -13,8 +12,9 @@ import { TrendDashboard } from "@/components/trend-dashboard"
 import { ReportGenerator } from "@/components/report-generator"
 import { CreditsPopup } from "@/components/credits-popup"
 import { MobileNavigation } from "@/components/mobile-navigation"
-import { Upload, BarChart3, Settings, History, TrendingUp, FileText } from "lucide-react"
+import { Upload, BarChart3, Settings, History, TrendingUp, FileText, Download } from "lucide-react"
 import { toast, Toaster } from "sonner"
+import { Button } from "@/components/ui/button"
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -619,20 +619,52 @@ export default function DataValidationTool() {
   }, [files, isLoading])
 
   // ============================================================================
-  // RENDER LOADING STATE
+  // CSV DOWNLOAD FUNCTIONALITY
   // ============================================================================
 
-  // Show loading spinner while initializing
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading your data...</p>
-        </div>
-      </div>
-    )
-  }
+  /**
+   * Download the active file as a CSV
+   */
+  const downloadActiveFileAsCSV = useCallback(() => {
+    if (!activeFile) {
+      toast.info("No file selected to download")
+      return
+    }
+    try {
+      const headers = activeFile.headers || []
+      const rows = activeFile.data || []
+
+      const escapeCell = (val: unknown) => {
+        if (val === null || val === undefined) return ""
+        const s = String(val)
+        // Escape if contains comma, double-quote, or newline
+        if (/[",\n]/.test(s)) {
+          return `"${s.replace(/"/g, '""')}"`
+        }
+        return s
+      }
+
+      const csv = [
+        headers.join(","),
+        ...rows.map((row) => headers.map((h) => escapeCell((row as any)[h])).join(",")),
+      ].join("\n")
+
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      const base = activeFile.name.replace(/\.[^/.]+$/, "")
+      a.download = `${base}_cleaned.csv`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      toast.success("Cleaned CSV downloaded")
+    } catch (err) {
+      console.error(err)
+      toast.error("Failed to generate CSV")
+    }
+  }, [activeFile])
 
   // ============================================================================
   // MAIN RENDER
@@ -686,7 +718,7 @@ export default function DataValidationTool() {
         {/* Main Tab Interface */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 lg:space-y-6">
           {/* Desktop Tab List - hidden on mobile */}
-          <TabsList className="hidden lg:grid w-full grid-cols-6 lg:w-auto lg:grid-cols-6">
+          <TabsList className="hidden lg:grid w-full grid-cols-7 lg:w-auto lg:grid-cols-7">
             <TabsTrigger value="upload" className="flex items-center gap-2">
               <Upload className="h-4 w-4" />
               Upload
@@ -698,6 +730,10 @@ export default function DataValidationTool() {
             <TabsTrigger value="validation" className="flex items-center gap-2" disabled={!activeFile}>
               <Settings className="h-4 w-4" />
               Validation
+            </TabsTrigger>
+            <TabsTrigger value="clean" className="flex items-center gap-2" disabled={!activeFile}>
+              <Download className="h-4 w-4" />
+              Clean Output
             </TabsTrigger>
             <TabsTrigger value="history" className="flex items-center gap-2">
               <History className="h-4 w-4" />
@@ -759,6 +795,85 @@ export default function DataValidationTool() {
                     <p className="text-gray-500 text-sm lg:text-base">
                       Please upload a file to configure validation rules
                     </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          <TabsContent value="clean" className="space-y-4 lg:space-y-6">
+            {activeFile ? (
+              <Card>
+                <CardHeader className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="text-lg lg:text-xl">Clean Output</CardTitle>
+                      <CardDescription className="text-sm lg:text-base">
+                        This is your validated, cleaned dataset. Download it as CSV or review a preview below.
+                      </CardDescription>
+                    </div>
+                    <Button onClick={downloadActiveFileAsCSV}>
+                      <Download className="h-4 w-4 mr-2" />
+                      Download CSV
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {/* Summary */}
+                  <div className="mb-4 text-sm text-gray-600">
+                    <span className="mr-4">Rows: {activeFile.data?.length || 0}</span>
+                    <span>Columns: {activeFile.headers?.length || 0}</span>
+                  </div>
+
+                  {/* Preview Table */}
+                  <div className="border rounded-md bg-white">
+                    <div className="max-h-[480px] overflow-auto">
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-gray-50">
+                          <tr>
+                            {activeFile.headers?.map((h) => (
+                              <th key={h} className="text-left font-semibold px-3 py-2 border-b">
+                                {h}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(activeFile.data || []).slice(0, 100).map((row, idx) => (
+                            <tr key={idx} className="odd:bg-gray-50">
+                              {activeFile.headers?.map((h) => {
+                                const v = (row as any)[h]
+                                return (
+                                  <td key={h} className="px-3 py-2 align-top border-b max-w-[320px]">
+                                    <div className="truncate" title={v === null || v === undefined ? "" : String(v)}>
+                                      {v === null || v === undefined || v === "" ? (
+                                        <span className="text-gray-400 italic">empty</span>
+                                      ) : (
+                                        String(v)
+                                      )}
+                                    </div>
+                                  </td>
+                                )
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {activeFile.data && activeFile.data.length > 100 && (
+                      <p className="text-xs text-gray-500 px-3 py-2 text-center">
+                        Showing first 100 of {activeFile.data.length} rows
+                      </p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardContent className="flex items-center justify-center h-48 lg:h-64">
+                  <div className="text-center">
+                    <Download className="h-8 w-8 lg:h-12 lg:w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-500 text-sm lg:text-base">Please upload and validate a file first</p>
                   </div>
                 </CardContent>
               </Card>
