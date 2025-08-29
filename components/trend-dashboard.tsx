@@ -26,6 +26,18 @@ interface TrendDashboardProps {
   files: FileData[]
 }
 
+function isFiniteNumber(n: unknown): n is number {
+  return typeof n === "number" && Number.isFinite(n)
+}
+function toNumberSafe(n: unknown, fallback = 0): number {
+  const v = typeof n === "string" ? Number(n) : (n as number)
+  return isFiniteNumber(v) ? v : fallback
+}
+function clamp0to100(n: number) {
+  if (!isFiniteNumber(n)) return 0
+  return Math.min(100, Math.max(0, n))
+}
+
 export function TrendDashboard({ files }: TrendDashboardProps) {
   if (files.length === 0) {
     return (
@@ -59,6 +71,18 @@ export function TrendDashboard({ files }: TrendDashboardProps) {
       }
     })
 
+  const safeTimeSeriesData = timeSeriesData
+    .map((d) => ({
+      ...d,
+      qualityScore: toNumberSafe(d.qualityScore),
+      totalIssues: toNumberSafe(d.totalIssues),
+      processingTime: toNumberSafe(d.processingTime),
+      rowsProcessed: toNumberSafe(d.rowsProcessed),
+      duplicates: toNumberSafe(d.duplicates),
+      nullPercentage: clamp0to100(toNumberSafe(d.nullPercentage)),
+    }))
+    .filter((d) => isFiniteNumber(d.qualityScore))
+
   // Calculate trends
   const recentFiles = files.filter((file) => isAfter(file.uploadDate, subDays(new Date(), 7)))
   const olderFiles = files.filter((file) => !isAfter(file.uploadDate, subDays(new Date(), 7)))
@@ -87,10 +111,12 @@ export function TrendDashboard({ files }: TrendDashboardProps) {
     {} as Record<string, number>,
   )
 
-  const severityChartData = Object.entries(severityData).map(([severity, count]) => ({
-    severity,
-    count,
-  }))
+  const severityChartData = Object.entries(severityData)
+    .map(([severity, count]) => ({
+      severity: severity || "Unknown",
+      count: toNumberSafe(count),
+    }))
+    .filter((d) => d.count > 0)
 
   // Data type distribution across all files
   const dataTypeDistribution = files.reduce(
@@ -105,10 +131,12 @@ export function TrendDashboard({ files }: TrendDashboardProps) {
     {} as Record<string, number>,
   )
 
-  const dataTypeChartData = Object.entries(dataTypeDistribution).map(([type, count]) => ({
-    type,
-    count,
-  }))
+  const dataTypeChartData = Object.entries(dataTypeDistribution)
+    .map(([type, count]) => ({
+      type: type || "Unknown",
+      count: toNumberSafe(count),
+    }))
+    .filter((d) => d.count > 0)
 
   // Processing efficiency over time
   const efficiencyData = files
@@ -116,10 +144,11 @@ export function TrendDashboard({ files }: TrendDashboardProps) {
     .sort((a, b) => a.uploadDate.getTime() - b.uploadDate.getTime())
     .map((file) => ({
       date: format(file.uploadDate, "MMM dd"),
-      processingTime: file.efficiency!.processingTime,
-      validationSpeed: file.efficiency!.validationSpeed,
-      memoryUsage: file.efficiency!.memoryUsage,
+      processingTime: toNumberSafe(file.efficiency!.processingTime),
+      validationSpeed: toNumberSafe(file.efficiency!.validationSpeed),
+      memoryUsage: toNumberSafe(file.efficiency!.memoryUsage),
     }))
+    .filter((d) => isFiniteNumber(d.processingTime))
 
   function getQualityScore(file: FileData) {
     if (!file.analysis) return 0
@@ -229,13 +258,13 @@ export function TrendDashboard({ files }: TrendDashboardProps) {
             <CardDescription>Track quality scores across file uploads</CardDescription>
           </CardHeader>
           <CardContent>
-            {timeSeriesData.length > 0 ? (
+            {safeTimeSeriesData.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={timeSeriesData}>
+                <LineChart data={safeTimeSeriesData}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="date" />
                   <YAxis domain={[0, 100]} />
-                  <Tooltip formatter={(value) => [`${value}%`, "Quality Score"]} />
+                  <Tooltip formatter={(value: any) => [`${toNumberSafe(value)}%`, "Quality Score"]} />
                   <Line
                     type="monotone"
                     dataKey="qualityScore"
@@ -267,7 +296,8 @@ export function TrendDashboard({ files }: TrendDashboardProps) {
                     cx="50%"
                     cy="50%"
                     labelLine={false}
-                    label={({ severity, percent }) => `${severity} ${percent ? (percent * 100).toFixed(0) : 0}%`}
+                    nameKey="severity"
+                    label={({ name, percent }: any) => `${name ?? ""} ${percent ? Math.round(percent * 100) : 0}%`}
                     outerRadius={80}
                     fill="#8884d8"
                     dataKey="count"
@@ -350,9 +380,9 @@ export function TrendDashboard({ files }: TrendDashboardProps) {
           <CardDescription>Comprehensive view of data quality indicators</CardDescription>
         </CardHeader>
         <CardContent>
-          {timeSeriesData.length > 0 ? (
+          {safeTimeSeriesData.length > 0 ? (
             <ResponsiveContainer width="100%" height={400}>
-              <LineChart data={timeSeriesData}>
+              <LineChart data={safeTimeSeriesData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="date" />
                 <YAxis />
@@ -387,7 +417,9 @@ export function TrendDashboard({ files }: TrendDashboardProps) {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline">{file.analysis?.totalRows.toLocaleString()} rows</Badge>
+                  <Badge variant="outline">
+                    {typeof file.analysis?.totalRows === "number" ? file.analysis.totalRows.toLocaleString() : 0} rows
+                  </Badge>
                   <Badge variant={getQualityScore(file) >= 80 ? "default" : "secondary"}>
                     {getQualityScore(file)}% quality
                   </Badge>
